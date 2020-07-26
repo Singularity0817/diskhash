@@ -1,6 +1,7 @@
 #ifndef DISKHASH_H_INCLUDE_GUARD__
 #define DISKHASH_H_INCLUDE_GUARD__
 #include <stddef.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {

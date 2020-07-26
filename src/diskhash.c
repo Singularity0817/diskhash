@@ -109,9 +109,11 @@ void set_table_at(HashTable* ht, uint64_t ix, const uint64_t val) {
     if (is_64bit(ht)) {
         uint64_t* table = (uint64_t*)hashtable_of(ht);
         table[ix] = val;
+        msync(&table[ix], sizeof(uint64_t), MS_SYNC);
     } else {
         uint32_t* table = (uint32_t*)hashtable_of(ht);
         table[ix] = val;
+        msync(&table[ix], sizeof(uint64_t), MS_SYNC);
     }
 }
 
@@ -455,11 +457,13 @@ int dht_insert(HashTable* ht, const char* key, const void* data, char** err) {
     }
     set_table_at(ht, h, header_of(ht)->slots_used_ + 1);
     ++header_of(ht)->slots_used_;
+    msync(&(header_of(ht)->slots_used_), sizeof(size_t), MS_SYNC);
     HashTableEntry et = entry_at(ht, h);
 
     strcpy((char*)et.ht_key, key);
+    msync((char *)et.ht_key, strlen(key)+1, MS_SYNC);
     memcpy(et.ht_data, data, cheader_of(ht)->opts_.object_datalen);
-
+    msync(et.ht_data, cheader_of(ht)->opts_.object_datalen, MS_SYNC);
     return 1;
 }
 
