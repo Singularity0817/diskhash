@@ -57,6 +57,14 @@ size_t aligned_size(size_t s) {
     return s_8bytes == s ? s : (s_8bytes + 8);
 }
 
+void data_persist(const void *addr, size_t len, int is_pmem) {
+    if (is_pmem) {
+        pmem_persist(addr, len);
+    } else {
+        pmem_msync(addr, len);
+    }
+}
+
 inline static
 HashTableHeader* header_of(HashTable* ht) {
     return (HashTableHeader*)ht->data_;
@@ -109,11 +117,13 @@ void set_table_at(HashTable* ht, uint64_t ix, const uint64_t val) {
     if (is_64bit(ht)) {
         uint64_t* table = (uint64_t*)hashtable_of(ht);
         table[ix] = val;
-        msync(&table[ix], sizeof(uint64_t), MS_SYNC);
+        //msync(&table[ix], sizeof(uint64_t), MS_SYNC);
+        data_persist(&table[ix], sizeof(uint64_t), ht->is_pmem_);
     } else {
         uint32_t* table = (uint32_t*)hashtable_of(ht);
         table[ix] = val;
-        msync(&table[ix], sizeof(uint64_t), MS_SYNC);
+        //msync(&table[ix], sizeof(uint64_t), MS_SYNC);
+        data_persist(&table[ix], sizeof(uint64_t), ht->is_pmem_);
     }
 }
 
@@ -202,13 +212,26 @@ HashTable* dht_open(const char* fpath, HashTableOpts opts, int flags, char** err
                                 PROT_READ
                                 : PROT_READ|PROT_WRITE;
     if (prot & PROT_WRITE) rp->flags_ |= HT_FLAG_CAN_WRITE;
+    /*
     rp->data_ = mmap(NULL,
             rp->datasize_,
             prot,
             MAP_SHARED,
             rp->fd_,
             0);
+    */
+    size_t mapped_len;
+    pmem_map_file(fpath, rp->datasize_, 0, 0, 0, &mapped_len, &rp->is_pmem_);
+    /*
     if (rp->data_ == MAP_FAILED) {
+        if (err) { *err = strdup("mmap() call failed."); }
+        close(rp->fd_);
+        free((char*)rp->fname_);
+        free(rp);
+        return NULL;
+    }
+    */
+    if (mapped_len != rp->datasize_) {
         if (err) { *err = strdup("mmap() call failed."); }
         close(rp->fd_);
         free((char*)rp->fname_);
@@ -220,6 +243,7 @@ HashTable* dht_open(const char* fpath, HashTableOpts opts, int flags, char** err
         header_of(rp)->opts_ = opts;
         header_of(rp)->cursize_ = 7;
         header_of(rp)->slots_used_ = 0;
+        data_persist(header_of(rp), sizeof(HashTableHeader), rp->is_pmem_);
     } else if (strcmp(header_of(rp)->magic, "DiskBasedHash11")) {
         if (!strcmp(header_of(rp)->magic, "DiskBasedHash10")) {
             rp->flags_ &= ~HT_FLAG_HASH_2;
@@ -253,7 +277,7 @@ int dht_load_to_memory(HashTable* ht, char** err) {
         if (err) *err = "dht_load_to_memory had already been called.";
         return 1;
     }
-    munmap(ht->data_, ht->datasize_);
+    pmem_munmap(ht->data_, ht->datasize_);
     ht->data_ = malloc(ht->datasize_);
     if (ht->data_) {
         size_t n = read(ht->fd_, ht->data_, ht->datasize_);
@@ -275,7 +299,7 @@ void dht_free(HashTable* ht) {
     if (ht->flags_ & HT_FLAG_IS_LOADED) {
         free(ht->data_);
     } else {
-        munmap(ht->data_, ht->datasize_);
+        pmem_munmap(ht->data_, ht->datasize_);
     }
     fsync(ht->fd_);
     close(ht->fd_);
@@ -348,14 +372,34 @@ size_t dht_reserve(HashTable* ht, size_t cap, char** err) {
         return 0;
     }
     temp_ht->datasize_ = total_size;
+    /*
     temp_ht->data_ = mmap(NULL,
             temp_ht->datasize_,
             PROT_READ|PROT_WRITE,
             MAP_SHARED,
             temp_ht->fd_,
             0);
+    */
+    size_t mapped_size;
+    pmem_map_file(temp_ht->data_, 0, 0, 0, &mapped_size, &temp_ht->is_pmem_);
     temp_ht->flags_ = ht->flags_;
+    /*
     if (temp_ht->data_ == MAP_FAILED) {
+        if (err) {
+            const int errorbufsize = 512;
+            *err = (char*)malloc(errorbufsize);
+            if (*err) {
+                snprintf(*err, errorbufsize, "Could not mmap() new hashtable: %s.\n", strerror(errno));
+            }
+        }
+        close(temp_ht->fd_);
+        unlink(temp_ht->fname_);
+        free((char*)temp_ht->fname_);
+        free(temp_ht);
+        return 0;
+    }
+    */
+    if (mapped_size != temp_ht->datasize_) {
         if (err) {
             const int errorbufsize = 512;
             *err = (char*)malloc(errorbufsize);
@@ -372,6 +416,7 @@ size_t dht_reserve(HashTable* ht, size_t cap, char** err) {
     memcpy(header_of(temp_ht), header_of(ht), sizeof(HashTableHeader));
     header_of(temp_ht)->cursize_ = n;
     header_of(temp_ht)->slots_used_ = 0;
+    data_persist(header_of(temp_ht), sizeof(HashTableHeader), temp_ht->is_pmem_);
 
     if (!strcmp(header_of(temp_ht)->magic, "DiskBasedHash10")) {
         strcpy(header_of(temp_ht)->magic, "DiskBasedHash11");
@@ -396,7 +441,7 @@ size_t dht_reserve(HashTable* ht, size_t cap, char** err) {
     dht_free(temp_ht);
     const HashTableOpts opts = header_of(ht)->opts_;
 
-    munmap(ht->data_, ht->datasize_);
+    pmem_munmap(ht->data_, ht->datasize_);
     close(ht->fd_);
 
     rename(temp_fname, ht->fname_);
@@ -457,13 +502,13 @@ int dht_insert(HashTable* ht, const char* key, const void* data, char** err) {
     }
     set_table_at(ht, h, header_of(ht)->slots_used_ + 1);
     ++header_of(ht)->slots_used_;
-    msync(&(header_of(ht)->slots_used_), sizeof(size_t), MS_SYNC);
+    data_persist(&(header_of(ht)->slots_used_), sizeof(size_t), ht->is_pmem_);
     HashTableEntry et = entry_at(ht, h);
 
     strcpy((char*)et.ht_key, key);
-    msync((char *)et.ht_key, strlen(key)+1, MS_SYNC);
+    data_persist(et.ht_key, strlen(key)+1, ht->is_pmem_);
     memcpy(et.ht_data, data, cheader_of(ht)->opts_.object_datalen);
-    msync(et.ht_data, cheader_of(ht)->opts_.object_datalen, MS_SYNC);
+    data_persist(et.ht_data, cheader_of(ht)->opts_.object_datalen, ht->is_pmem_);
     return 1;
 }
 

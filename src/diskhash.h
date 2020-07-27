@@ -2,6 +2,7 @@
 #define DISKHASH_H_INCLUDE_GUARD__
 #include <stddef.h>
 #include <sys/types.h>
+#include <libpmem.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,7 @@ typedef struct HashTable {
     void* data_;
     size_t datasize_;
     int flags_;
+    int is_pmem_;
 } HashTable;
 
 
