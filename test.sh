@@ -1,3 +1,5 @@
 rm -f ./a.out
-gcc test.c ./src/diskhash.c -o a.out
+rm -f ./testing.dht
+rm -f /mnt/pmem/zwh_test/testing.dht
+gcc -g test.c ./src/diskhash.c -lpmem -o a.out
 ./a.out

@@ -19,12 +19,17 @@ int main(void) {
     opts.key_maxlen = 15;
     opts.object_datalen = sizeof(uint64_t);
     char* err = NULL;
-    //HashTable* ht = dht_open("testing.dht", opts, O_RDWR|O_CREAT, &err);
-    HashTable* ht = dht_open("/mnt/pmem/zwh_test/testing.dht", opts, O_RDWR|O_CREAT, &err);
+    HashTable* ht = dht_open("testing.dht", opts, O_RDWR|O_CREAT, &err);
+    //HashTable* ht = dht_open("/mnt/pmem/zwh_test/testing.dht", opts, O_RDWR|O_CREAT, &err);
     if (!ht) {
         if (!err) err = "Unknown error";
         fprintf(stderr, "Failed opening hash table: %s.\n", err);
         return 1;
+    }
+    if (ht->is_pmem_) {
+        printf("Working on pmem...\n");
+    } else {
+        printf("Working on disk...\n");
     }
     char key[16];
     key[15] = '\0';

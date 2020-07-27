@@ -221,7 +221,7 @@ HashTable* dht_open(const char* fpath, HashTableOpts opts, int flags, char** err
             0);
     */
     size_t mapped_len;
-    pmem_map_file(fpath, rp->datasize_, 0, 0, 0, &mapped_len, &rp->is_pmem_);
+    pmem_map_file(fpath, 0, 0, 0, &mapped_len, &rp->is_pmem_);
     /*
     if (rp->data_ == MAP_FAILED) {
         if (err) { *err = strdup("mmap() call failed."); }
@@ -277,7 +277,7 @@ int dht_load_to_memory(HashTable* ht, char** err) {
         if (err) *err = "dht_load_to_memory had already been called.";
         return 1;
     }
-    pmem_munmap(ht->data_, ht->datasize_);
+    pmem_unmap(ht->data_, ht->datasize_);
     ht->data_ = malloc(ht->datasize_);
     if (ht->data_) {
         size_t n = read(ht->fd_, ht->data_, ht->datasize_);
@@ -299,7 +299,7 @@ void dht_free(HashTable* ht) {
     if (ht->flags_ & HT_FLAG_IS_LOADED) {
         free(ht->data_);
     } else {
-        pmem_munmap(ht->data_, ht->datasize_);
+        pmem_unmap(ht->data_, ht->datasize_);
     }
     fsync(ht->fd_);
     close(ht->fd_);
@@ -441,7 +441,7 @@ size_t dht_reserve(HashTable* ht, size_t cap, char** err) {
     dht_free(temp_ht);
     const HashTableOpts opts = header_of(ht)->opts_;
 
-    pmem_munmap(ht->data_, ht->datasize_);
+    pmem_unmap(ht->data_, ht->datasize_);
     close(ht->fd_);
 
     rename(temp_fname, ht->fname_);
